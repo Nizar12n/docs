@@ -1,11 +1,11 @@
-# This Dockerfile can be used for docker-based deployments to platforms
-# like Now or Moda, but it is currently _not_ used by our Heroku deployments
-# It uses two multi-stage builds: `install` and the main build to keep the image size down.
+# This Dockerfile is used for docker-based deployments to Azure for both preview environments and production
 
 # --------------------------------------------------------------------------------
 # BASE IMAGE
 # --------------------------------------------------------------------------------
-FROM node:16.13.2-alpine@sha256:f21f35732964a96306a84a8c4b5a829f6d3a0c5163237ff4b6b8b34f8d70064b as base
+# To update the sha, run `docker pull node:$VERSION-alpine`
+# look for something like: `Digest: sha256:0123456789abcdef`
+FROM node:20-alpine@sha256:ec0c413b1d84f3f7f67ec986ba885930c57b5318d2eb3abc6960ee05d4f2eb28 as base
 
 # This directory is owned by the node user
 ARG APP_HOME=/home/node/app
@@ -23,12 +23,12 @@ FROM base as all_deps
 
 COPY --chown=node:node package.json package-lock.json ./
 
-RUN npm ci --no-optional
+RUN npm ci --no-optional --registry https://registry.npmjs.org/
 
 # For Next.js v12+
-# This the appropriate necessary extra for node:16-alpine
+# This the appropriate necessary extra for node:VERSION-alpine
 # Other options are https://www.npmjs.com/search?q=%40next%2Fswc
-# RUN npm i @next/swc-linux-x64-musl --no-save
+RUN npm i @next/swc-linux-x64-musl --no-save || npm i @next/swc-linux-arm64-musl --no-save
 
 
 # ---------------
@@ -44,17 +44,18 @@ RUN npm prune --production
 # ---------------
 FROM all_deps as builder
 
-COPY stylesheets ./stylesheets
-COPY pages ./pages
-COPY components ./components
-COPY lib ./lib
-
-# One part of the build relies on this content file to pull all-products
+COPY src ./src
+# The star is because it's an optional directory
+COPY .remotejson-cache* ./.remotejson-cache
+# The star is because it's an optional file
+COPY .pageinfo-cache.json.br* ./.pageinfo-cache.json.br
+# Certain content is necessary for being able to build
 COPY content/index.md ./content/index.md
+COPY content/rest ./content/rest
+COPY data ./data
 
 COPY next.config.js ./next.config.js
 COPY tsconfig.json ./tsconfig.json
-COPY next-env.d.ts ./next-env.d.ts
 
 RUN npm run build
 
@@ -73,34 +74,38 @@ COPY --chown=node:node --from=builder $APP_HOME/.next $APP_HOME/.next
 # We should always be running in production mode
 ENV NODE_ENV production
 
-# Whether to hide iframes, add warnings to external links
-ENV AIRGAP false
-
-# Preferred port for server.mjs
+# Preferred port for server.js
 ENV PORT 4000
 
 ENV ENABLED_LANGUAGES "en"
 
+# This makes it possible to set `--build-arg BUILD_SHA=abc123`
+# and it then becomes available as an environment variable in the docker run.
+ARG BUILD_SHA
+ENV BUILD_SHA=$BUILD_SHA
+
 # Copy only what's needed to run the server
 COPY --chown=node:node package.json ./
 COPY --chown=node:node assets ./assets
-COPY --chown=node:node includes ./includes
 COPY --chown=node:node content ./content
-COPY --chown=node:node lib ./lib
-COPY --chown=node:node middleware ./middleware
-COPY --chown=node:node feature-flags.json ./
+COPY --chown=node:node src ./src
+COPY --chown=node:node .remotejson-cache* ./.remotejson-cache
+COPY --chown=node:node .pageinfo-cache.json.br* ./.pageinfo-cache.json.br
 COPY --chown=node:node data ./data
 COPY --chown=node:node next.config.js ./
-COPY --chown=node:node server.mjs ./server.mjs
 
 EXPOSE $PORT
 
-CMD ["node", "server.mjs"]
+CMD ["node_modules/.bin/tsx", "src/frame/server.ts"]
 
 # --------------------------------------------------------------------------------
 # PRODUCTION IMAGE - includes all translations
 # --------------------------------------------------------------------------------
 FROM preview as production
+
+# Override what was set for previews
+# Make this match the default of `Object.keys(languages)` in src/languages/lib/languages.js
+ENV ENABLED_LANGUAGES "en,zh,es,pt,ru,ja,fr,de,ko"
 
 # Copy in all translations
 COPY --chown=node:node translations ./translations

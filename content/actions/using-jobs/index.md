@@ -7,13 +7,12 @@ redirect_from:
 versions:
   fpt: '*'
   ghes: '*'
-  ghae: '*'
   ghec: '*'
 children:
   - /using-jobs-in-a-workflow
   - /choosing-the-runner-for-a-job
   - /using-conditions-to-control-job-execution
-  - /using-a-build-matrix-for-your-jobs
+  - /using-a-matrix-for-your-jobs
   - /using-concurrency
   - /using-environments-for-jobs
   - /running-jobs-in-a-container
@@ -21,3 +20,4 @@ children:
   - /assigning-permissions-to-jobs
   - /defining-outputs-for-jobs
 ---
+
